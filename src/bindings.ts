@@ -879,6 +879,18 @@ export const commands = {
 } | null, doc: number | null) => typedError<View, IdeError>(__TAURI_INVOKE("plugin_view_render", { pluginId, view, viewport, doc })),
 	/**  A user action in a plugin view or custom editor. */
 	pluginViewEvent: (pluginId: string, view: string, event: ViewEvent, doc: number | null) => typedError<null, IdeError>(__TAURI_INVOKE("plugin_view_event", { pluginId, view, event, doc })),
+	/**  The page of a plugin's web view or custom editor (`web = …`). */
+	pluginWebPage: (pluginId: string, view: string) => typedError<WebPage, IdeError>(__TAURI_INVOKE("plugin_web_page", { pluginId, view })),
+	/**
+	 *  Writes what a web view saves (`openidea.saveFile`) to the path the user
+	 *  chose in the save dialog, on this machine.
+	 */
+	pluginWebSaveFile: (path: string, base64: string) => typedError<null, IdeError>(__TAURI_INVOKE("plugin_web_save_file", { path, base64 })),
+	/**
+	 *  Reads the file the user picked in an open dialog for a web view
+	 *  (`openidea.openFile`), on this machine; base64.
+	 */
+	pluginWebReadFile: (path: string) => typedError<string, IdeError>(__TAURI_INVOKE("plugin_web_read_file", { path })),
 	/**  Gutter markers of plugin `line-markers` providers for an open document. */
 	pluginLineMarkers: (doc: DocId) => typedError<LineMarkerInfo[], IdeError>(__TAURI_INVOKE("plugin_line_markers", { doc })),
 	/**  The marketplace's plugins: read again when `refresh`, else the last index read. */
@@ -6559,6 +6571,16 @@ export type WebArtifact = {
 export type WebGoto = {
 	reference: WebReference,
 	targets: Location[],
+};
+
+/**  The page of a web view, for the client to load in its frame. */
+export type WebPage = {
+	/**
+	 *  `<plugin id>/<revision>/<entry>` under the `openidea-plugin` scheme. The
+	 *  revision changes with the installed package, so a cached file is never
+	 *  stale; relative URLs in the page resolve to the package's files.
+	 */
+	path: string,
 };
 
 export type WebReference = {
