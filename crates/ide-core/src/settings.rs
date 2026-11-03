@@ -59,6 +59,9 @@ pub struct Settings {
     /// Build, Execution, Deployment › Run Targets.
     pub run_targets: Vec<RunTarget>,
     pub cmake: CMakeSettings,
+    /// Plugin settings (`[contributes.settings]`): plugin id → its values by key.
+    #[specta(type = BTreeMap<String, BTreeMap<String, specta_typescript::Unknown>>)]
+    pub plugins: BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 /// Absent profiles retain automatic discovery for existing projects.
@@ -192,6 +195,7 @@ impl Default for Settings {
             deployment: DeploymentSettings::default(),
             run_targets: Vec::new(),
             cmake: CMakeSettings::default(),
+            plugins: BTreeMap::new(),
         }
     }
 }
