@@ -23,6 +23,10 @@ export const commands = {
 	windowGroupSelect: (label: string) => typedError<null, IdeError>(__TAURI_INVOKE("window_group_select", { label })),
 	windowGroupDetach: () => typedError<null, IdeError>(__TAURI_INVOKE("window_group_detach")),
 	windowGroupClose: (label: string) => typedError<null, IdeError>(__TAURI_INVOKE("window_group_close", { label })),
+	/**  Closes several project tabs one by one (each asks about its own unsaved changes), then selects `keep`. */
+	windowGroupCloseTabs: (keep: string, labels: string[]) => typedError<null, IdeError>(__TAURI_INVOKE("window_group_close_tabs", { keep, labels })),
+	/**  This window kept its project open (unsaved-changes prompt cancelled); stops a batch close. */
+	windowGroupCancelClose: () => __TAURI_INVOKE<void>("window_group_cancel_close"),
 	windowGroupReorder: (labels: string[]) => typedError<null, IdeError>(__TAURI_INVOKE("window_group_reorder", { labels })),
 	windowGroupRestore: () => typedError<null, IdeError>(__TAURI_INVOKE("window_group_restore")),
 	/**
@@ -145,6 +149,7 @@ export const commands = {
 	notebookInterrupt: (id: string) => typedError<null, IdeError>(__TAURI_INVOKE("notebook_interrupt", { id })),
 	notebookRestart: (id: string) => typedError<NotebookSnapshot, IdeError>(__TAURI_INVOKE("notebook_restart", { id })),
 	fsReadDir: (path: string) => typedError<FileEntry[], IdeError>(__TAURI_INVOKE("fs_read_dir", { path })),
+	fsEntryKind: (path: string) => typedError<EntryKind, IdeError>(__TAURI_INVOKE("fs_entry_kind", { path })),
 	/**  Size and text/binary classification, from the file's head only. */
 	fsProbe: (path: string) => typedError<FileProbe, IdeError>(__TAURI_INVOKE("fs_probe", { path })),
 	/**  Up to `len` bytes from `offset` (capped per call), base64-encoded. */
@@ -167,6 +172,8 @@ export const commands = {
 	/**  Moving to the trash can take a while (large trees): kept off the main thread. */
 	fsDelete: (path: string) => typedError<null, IdeError>(__TAURI_INVOKE("fs_delete", { path })),
 	fsCopy: (from: string, to: string) => typedError<null, IdeError>(__TAURI_INVOKE("fs_copy", { from, to })),
+	fsCopyMerge: (sourceRoot: string, destinationRoot: string, path: string, overwrite: boolean) => typedError<null, IdeError>(__TAURI_INVOKE("fs_copy_merge", { sourceRoot, destinationRoot, path, overwrite })),
+	fsCompareDirectories: (left: string, right: string, request: RequestId, onProgress: Channel<DirectoryCompareProgress>) => typedError<DirectoryCompareEntry[], IdeError>(__TAURI_INVOKE("fs_compare_directories", { left, right, request, onProgress })),
 	/**
 	 *  Reads a text file without opening it as a document (previews, quick
 	 *  definition). Prefers the unsaved buffer when the file is open.
@@ -307,6 +314,8 @@ export const commands = {
 	/**  Quits through every window's unsaved-changes check, then starts again. */
 	appRestart: () => __TAURI_INVOKE<void>("app_restart"),
 	indexStatus: () => typedError<IndexStatus, IdeError>(__TAURI_INVOKE("index_status")),
+	/**  Spring Web mapping sources for the request-path index of Search Everywhere. */
+	springRouteSources: () => typedError<RouteSource[], IdeError>(__TAURI_INVOKE("spring_route_sources")),
 	findFiles: (query: string, limit: number) => typedError<FileMatch[], IdeError>(__TAURI_INVOKE("find_files", { query, limit })),
 	findSymbols: (query: string, filter: SymbolFilter, limit: number) => typedError<SymbolMatch[], IdeError>(__TAURI_INVOKE("find_symbols", { query, filter, limit })),
 	markRecent: (path: string) => typedError<null, IdeError>(__TAURI_INVOKE("mark_recent", { path })),
@@ -324,6 +333,7 @@ export const commands = {
 	pathCompletions: (from: IpcPath, prefix: string) => typedError<PathCompletion[], IdeError>(__TAURI_INVOKE("path_completions", { from, prefix })),
 	/**  Paths in an HTML document or stylesheet that name no existing file. */
 	webUnresolvedReferences: (doc: DocId) => typedError<FileReference[], IdeError>(__TAURI_INVOKE("web_unresolved_references", { doc })),
+	dependencyVersions: (doc: DocId, offset: number | null, request: RequestId) => typedError<DependencyVersions[], IdeError>(__TAURI_INVOKE("dependency_versions", { doc, offset, request })),
 	/**
 	 *  Misspelt words in the comments, string literals and declared names of
 	 *  `doc` that `scope` includes (all of its text for prose). Cancel with
@@ -372,10 +382,11 @@ export const commands = {
 	 */
 	lspImplementations: (request: RequestId, doc: DocId, positions: Pos[]) => typedError<Location[][], IdeError>(__TAURI_INVOKE("lsp_implementations", { request, doc, positions })),
 	/**
-	 *  Contents of a virtual document (library class, decompiled code) that a
-	 *  language server returned a non-`file:` URI for. Cached per project.
+	 *  Contents of a read-only language-server document, including JDT library
+	 *  classes and disk class files. Cached per project.
 	 */
 	lspVirtualDocument: (uri: string) => typedError<VirtualDocument, IdeError>(__TAURI_INVOKE("lsp_virtual_document", { uri })),
+	lspResolveClassFile: (path: string) => typedError<string, IdeError>(__TAURI_INVOKE("lsp_resolve_class_file", { path })),
 	/**
 	 *  References of the symbol at `pos`. `project_wide` also searches project files
 	 *  outside the language server's analysis scope; bulk scans over many symbols
@@ -419,11 +430,20 @@ export const commands = {
 	lspRestart: (server: ServerId) => typedError<null, IdeError>(__TAURI_INVOKE("lsp_restart", { server })),
 	/**  Applies a (previewed) workspace edit, e.g. after rename confirmation. */
 	applyWorkspaceEdit: (edit: WorkspaceEdit) => typedError<null, IdeError>(__TAURI_INVOKE("apply_workspace_edit", { edit })),
+	prepareWorkspaceEdit: (edit: WorkspaceEdit) => typedError<WorkspaceEdit, IdeError>(__TAURI_INVOKE("prepare_workspace_edit", { edit })),
+	undoWorkspaceEdit: (id: number) => typedError<null, IdeError>(__TAURI_INVOKE("undo_workspace_edit", { id })),
+	redoWorkspaceEdit: (id: number) => typedError<null, IdeError>(__TAURI_INVOKE("redo_workspace_edit", { id })),
 	/**
 	 *  Runs a server command (`workspace/executeCommand`), e.g. a completion item's
 	 *  follow-up command. Edits the server requests arrive via `workspace/applyEdit`.
 	 */
 	lspExecuteCommand: (doc: DocId, command: Command) => typedError<null, IdeError>(__TAURI_INVOKE("lsp_execute_command", { doc, command })),
+	lspResolveCommand: (request: RequestId, doc: DocId, server: ServerId, command: Command, answers: FormAnswer[]) => typedError<{
+	command: Command,
+	formFields: FormField[],
+	formAnswers: FormAnswer[],
+} | null, IdeError>(__TAURI_INVOKE("lsp_resolve_command", { request, doc, server, command, answers })),
+	lspExecuteCodeAction: (request: RequestId, doc: DocId, action: CodeAction, answers: FormAnswer[]) => typedError<IpcPath[], IdeError>(__TAURI_INVOKE("lsp_execute_code_action", { request, doc, action, answers })),
 	/**  Changes of every repository of the project. */
 	vcsStatus: () => typedError<FileStatus[], IdeError>(__TAURI_INVOKE("vcs_status")),
 	/**  The project's repositories, the primary one first. */
@@ -509,6 +529,8 @@ export const commands = {
 	vcsRemoveWorktree: (repo: string | null, path: string, force: boolean) => typedError<null, IdeError>(__TAURI_INVOKE("vcs_remove_worktree", { repo, path, force })),
 	/**  Compare with Local: tracked files that differ between `rev` and the working tree. */
 	vcsDiffWithWorktree: (repo: string | null, rev: string) => typedError<ChangedFile[], IdeError>(__TAURI_INVOKE("vcs_diff_with_worktree", { repo, rev })),
+	vcsCompareScope: (paths: string[]) => typedError<CompareScope, IdeError>(__TAURI_INVOKE("vcs_compare_scope", { paths })),
+	vcsComparePaths: (paths: string[], revision: string, repositories: string[] | null, request: RequestId) => typedError<CompareResult, IdeError>(__TAURI_INVOKE("vcs_compare_paths", { paths, revision, repositories, request })),
 	/**  Files that differ between two revisions (the "N files updated" of Update Project). */
 	vcsDiffRevisions: (repo: string | null, from: string, to: string) => typedError<ChangedFile[], IdeError>(__TAURI_INVOKE("vcs_diff_revisions", { repo, from, to })),
 	/**  The best common ancestor of `a` and `b` (`git merge-base`), if any. */
@@ -528,7 +550,7 @@ export const commands = {
 	vcsShelfRename: (id: string, name: string) => typedError<null, IdeError>(__TAURI_INVOKE("vcs_shelf_rename", { id, name })),
 	vcsShelfPatch: (id: string, path: string | null) => typedError<string, IdeError>(__TAURI_INVOKE("vcs_shelf_patch", { id, path })),
 	vcsShelfDiff: (id: string) => typedError<ShelfDiffFile[], IdeError>(__TAURI_INVOKE("vcs_shelf_diff", { id })),
-	vcsShelfImport: (name: string, patch: string) => typedError<null, IdeError>(__TAURI_INVOKE("vcs_shelf_import", { name, patch })),
+	vcsShelfImport: (repo: string | null, name: string, patch: string) => typedError<null, IdeError>(__TAURI_INVOKE("vcs_shelf_import", { repo, name, patch })),
 	vcsChangelistsLoad: () => typedError<ChangelistState, IdeError>(__TAURI_INVOKE("vcs_changelists_load")),
 	vcsChangelistsSave: (changelists: ChangelistState) => typedError<null, IdeError>(__TAURI_INVOKE("vcs_changelists_save", { changelists })),
 	/**  Create Patch › Save to file. */
@@ -538,6 +560,7 @@ export const commands = {
 	 *  to start the shell takes tens of milliseconds, a frozen UI if run there.
 	 */
 	termSpawn: (options: TerminalOptions, onOutput: Channel<string>) => typedError<TerminalInfo, IdeError>(__TAURI_INVOKE("term_spawn", { options, onOutput })),
+	termStoreImage: (id: TerminalId, data: number[], mime: string) => typedError<string, IdeError>(__TAURI_INVOKE("term_store_image", { id, data, mime })),
 	termWrite: (id: TerminalId, data: string) => typedError<null, IdeError>(__TAURI_INVOKE("term_write", { id, data })),
 	termResize: (id: TerminalId, cols: number, rows: number) => typedError<null, IdeError>(__TAURI_INVOKE("term_resize", { id, cols, rows })),
 	termKill: (id: TerminalId) => typedError<null, IdeError>(__TAURI_INVOKE("term_kill", { id })),
@@ -552,6 +575,7 @@ export const commands = {
 	termAvailableShells: () => __TAURI_INVOKE<string[]>("term_available_shells"),
 	/**  Detected configs followed by user-defined ones (user ids win on conflict). */
 	runConfigs: () => typedError<RunConfig_Serialize[], IdeError>(__TAURI_INVOKE("run_configs")),
+	runDotnetResolve: (config: RunConfig_Deserialize, debug: boolean) => typedError<RunConfig_Serialize, IdeError>(__TAURI_INVOKE("run_dotnet_resolve", { config, debug })),
 	runSaveConfigs: (configs: RunConfig_Deserialize[], removedDetectedIds: string[] | null) => typedError<null, IdeError>(__TAURI_INVOKE("run_save_configs", { configs, removedDetectedIds })),
 	/**  Configuration templates: per-type defaults applied to new configurations. */
 	runTemplates: () => typedError<RunConfig_Serialize[], IdeError>(__TAURI_INVOKE("run_templates")),
@@ -588,6 +612,8 @@ export const commands = {
 	/**  "Allow multiple instances": Run on a running config starts another one instead of restarting it. */
 	allowParallel?: boolean,
 }) & (RunExtras_Serialize) | null, IdeError>(__TAURI_INVOKE("run_tomcat_build", { config })),
+	runApplicationBuild: (config: RunConfig_Deserialize, module: string) => typedError<RunConfig_Serialize, IdeError>(__TAURI_INVOKE("run_application_build", { config, module })),
+	runApplicationPublish: (config: RunConfig_Deserialize, classPaths: string[], mainClass: string) => typedError<null, IdeError>(__TAURI_INVOKE("run_application_publish", { config, classPaths, mainClass })),
 	runTomcatUpdate: (config: RunConfig_Deserialize, mode: string) => typedError<null, IdeError>(__TAURI_INVOKE("run_tomcat_update", { config, mode })),
 	/**
 	 *  Results from the JUnit XML reports (Surefire, Failsafe, Gradle) of the module at
@@ -852,7 +878,7 @@ export const commands = {
 	pluginActivationEvent: (kind: string, value: string) => typedError<null, IdeError>(__TAURI_INVOKE("plugin_activation_event", { kind, value })),
 	/**
 	 *  Plugin packages available locally for installation: `<resources>/plugins`
-	 *  when bundled, plus the repository's sample `plugins/` in debug builds.
+	 *  when bundled, plus the repository's official plugins in debug builds.
 	 */
 	pluginCatalog: () => typedError<CatalogPlugin[], IdeError>(__TAURI_INVOKE("plugin_catalog")),
 	pluginUninstall: (id: string) => typedError<null, IdeError>(__TAURI_INVOKE("plugin_uninstall", { id })),
@@ -900,7 +926,7 @@ export const commands = {
 	pluginSetMarketUrl: (url: string | null) => __TAURI_INVOKE<void>("plugin_set_market_url", { url }),
 	/**  Downloads and checks a marketplace plugin; returns the folder for the install page. */
 	pluginMarketDownload: (id: string) => typedError<string, IdeError>(__TAURI_INVOKE("plugin_market_download", { id })),
-	/**  Unpacks a package file (`.oiplugin`); returns the folder for the install page. */
+	/**  Unpacks a package file (`.oiplugin` or `.zip`); returns the folder for the install page. */
 	pluginUnpackPackage: (path: string) => typedError<string, IdeError>(__TAURI_INVOKE("plugin_unpack_package", { path })),
 	/**  Goes back to the version the last update of `id` replaced. */
 	pluginRollBack: (id: string) => typedError<PluginInfo, IdeError>(__TAURI_INVOKE("plugin_roll_back", { id })),
@@ -1079,6 +1105,8 @@ export const commands = {
 	 *  `on_channel` tagged with the id.
 	 */
 	remoteInvoke: (cmd: string, args: string, onChannel: Channel<ChannelFrame>) => typedError<string, IdeError>(__TAURI_INVOKE("remote_invoke", { cmd, args, onChannel })),
+	/**  A client OS file belongs to this machine even when its destination is remote. */
+	remoteImportLocal: (from: string, to: string, request: RequestId) => typedError<string[], IdeError>(__TAURI_INVOKE("remote_import_local", { from, to, request })),
 	/**
 	 *  Reload Environment: new child processes get the login shell's current environment
 	 *  (and the project's `remoteEnv` on a remote host); running ones keep theirs.
@@ -1265,7 +1293,9 @@ export type AgentEvent =
 /**  The task's conversation was cut to its first `length` entries (turns rolled back). */
 { type: "truncated"; task: string; length: number } | 
 /**  Entry `index` of `task` (of its subagent `subagent`) was added or replaced. */
-{ type: "entry"; task: string; subagent: string | null; index: number; entry: AgentEntry };
+{ type: "entry"; task: string; subagent: string | null; index: number; entry: AgentEntry } | 
+/**  The installed or configured agent providers changed. */
+{ type: "providers" };
 
 export type AgentImage = {
 	mimeType: string,
@@ -1479,6 +1509,8 @@ export type AppearanceSettings = {
 	/**  Apply `ui_font_family` / `ui_font_size` (otherwise the theme's). */
 	useCustomFont?: boolean,
 	uiFontFamily?: string,
+	/**  Font tried when `ui_font_family` lacks a glyph; empty = none. */
+	uiFontFallback?: string,
 	contrastScrollbars?: boolean,
 	/**  Adjust colours for red-green vision deficiency. */
 	redGreenVision?: boolean,
@@ -1495,6 +1527,7 @@ export type AppearanceSettings = {
 	editorAntialiasing?: string,
 	showToolWindowBars?: boolean,
 	showToolWindowNames?: boolean,
+	showToolWindowBadges?: boolean,
 	widescreenToolWindows?: boolean,
 	/**
 	 *  Status bar widgets shown (`true`) or hidden (`false`) by the user
@@ -1693,6 +1726,30 @@ export type ByteRange = {
 	total: number,
 };
 
+export type CMakeProfile = {
+	name?: string,
+	buildType?: string,
+	generator?: string,
+	cmakeArgs?: string[],
+	/**  Empty uses cmake-build-<lowercase build type>. */
+	buildDir?: string,
+	buildArgs?: string[],
+	env?: { [key in string]: string },
+};
+
+/**  Absent profiles retain automatic discovery for existing projects. */
+export type CMakeSettings = CMakeSettings_Serialize | CMakeSettings_Deserialize;
+
+/**  Absent profiles retain automatic discovery for existing projects. */
+export type CMakeSettings_Deserialize = {
+	profiles?: CMakeProfile[] | null,
+};
+
+/**  Absent profiles retain automatic discovery for existing projects. */
+export type CMakeSettings_Serialize = {
+	profiles?: CMakeProfile[] | null,
+};
+
 export type CallHierarchy = {
 	items: HierarchyItem[],
 	incomplete: ReferencesIncomplete | null,
@@ -1803,6 +1860,13 @@ export type CheckoutOutcome = { kind: "done" } |
  */
 { kind: "conflicts"; files: string[] };
 
+export type ClassifiedReference = {
+	/**  Optional for older Java extensions; missing means unclassified. */
+	access?: ReferenceAccess | null,
+	location: Location,
+	kind: ReferenceKind,
+};
+
 export type ClearCachesResult = {
 	/**  Syntax trees dropped (they are rebuilt on demand). */
 	syntaxTrees: number,
@@ -1910,6 +1974,12 @@ export type Command = {
 	arguments: string[],
 };
 
+export type CommandForm = {
+	command: Command,
+	formFields: FormField[],
+	formAnswers: FormAnswer[],
+};
+
 export type Commit = {
 	id: string,
 	shortId: string,
@@ -1961,6 +2031,18 @@ export type CommitSettings = {
 	bodyLimit?: number,
 	showRightMargin?: boolean,
 	wrapAtMargin?: boolean,
+};
+
+export type CompareResult = {
+	repositories: RepositoryComparison[],
+	skippedPaths: IpcPath[],
+};
+
+export type CompareScope = {
+	repositories: IpcPath[],
+	/**  Selected content outside registered repositories; workspace parents expand to their skipped children. */
+	skippedPaths: IpcPath[],
+	singleFile: boolean,
 };
 
 export type CompletionItem = {
@@ -2498,6 +2580,17 @@ export type DeletedBranch = {
 	unmerged: boolean,
 };
 
+export type DependencyUpdate = {
+	latest: string,
+	replacement: string,
+};
+
+export type DependencyVersions = {
+	dependency: ManifestDependency,
+	versions: string[],
+	update: DependencyUpdate | null,
+};
+
 /**  Where a local file is deployed. */
 export type DeployedPath = {
 	server: string,
@@ -2571,6 +2664,25 @@ export type Diagnostic = {
 	 */
 	server?: string | null,
 };
+
+export type DirectoryCompareEntry = {
+	path: string,
+	status: DirectoryCompareStatus,
+	leftKind: EntryKind | null,
+	rightKind: EntryKind | null,
+	leftLink?: string | null,
+	rightLink?: string | null,
+};
+
+export type DirectoryCompareProgress = {
+	scanned: number,
+	compared: number,
+	total: number | null,
+	bytesRead: number | null,
+	path: string,
+};
+
+export type DirectoryCompareStatus = "leftOnly" | "rightOnly" | "different" | "equal";
 
 /**  Changes under a folder (Show History on a directory). */
 export type DirectoryHistory = {
@@ -3010,9 +3122,11 @@ export type EnvReloaded = {
 	shellRead: boolean,
 };
 
+export type ErrorData = { type: "tool"; tool: string; missing: boolean };
+
 export type ErrorKind = "notFound" | "alreadyExists" | "permissionDenied" | "invalidInput" | 
 /**  Document version mismatch; the UI must resync the full text. */
-"outOfSync" | "cancelled" | 
+"outOfSync" | "cancelled" | "timedOut" | 
 /**  A required external tool (language server, git, debugger) is unavailable. */
 "unavailable" | "io" | "protocol" | "internal";
 
@@ -3089,7 +3203,9 @@ export type FileCoverage = {
 	branchesCovered: number,
 };
 
-export type FileEdit = { kind: "edit"; path: IpcPath; edits: TextEdit[] } | { kind: "create"; path: IpcPath; overwrite: boolean } | { kind: "rename"; from: IpcPath; to: IpcPath } | { kind: "delete"; path: IpcPath; recursive: boolean };
+export type FileEdit = { kind: "edit"; path: IpcPath; edits: TextEdit[]; 
+/**  LSP TextDocumentEdit version; null/unversioned edits use content preconditions. */
+version?: number | null } | { kind: "create"; path: IpcPath; overwrite: boolean } | { kind: "rename"; from: IpcPath; to: IpcPath } | { kind: "delete"; path: IpcPath; recursive: boolean };
 
 export type FileEntry = {
 	name: string,
@@ -3233,9 +3349,24 @@ export type FontFamily = {
 	monospaced: boolean,
 };
 
+/**  The string form supported by gopls's experimental interactive command protocol. */
+export type FormAnswer = {
+	id: string,
+	value: string,
+};
+
+export type FormField = {
+	id: string,
+	description: string,
+	required: boolean,
+	default?: string | null,
+	error?: string | null,
+};
+
 export type FormatOptions = {
 	tabSize: number,
 	insertSpaces: boolean,
+	onSave?: boolean,
 };
 
 /**  One occurrence of a duplicated code fragment. */
@@ -3338,6 +3469,8 @@ export type GitOperation =
 { op: "interactiveRebase"; base: string | null; entries: RebaseEntry[] };
 
 export type GitSettings = {
+	/**  Show blame after the current editor line. */
+	inlineBlame?: boolean,
 	/**  Path to the git executable; empty = auto-detect. */
 	executable?: string,
 	/**  Default of Update Project: `merge` | `rebase`. */
@@ -3572,6 +3705,8 @@ export type HunkRange = {
 export type IdeError = {
 	kind: ErrorKind,
 	message: string,
+	/**  Structured detail for errors the UI acts on; `null` for plain errors. */
+	data?: ErrorData | null,
 };
 
 export type IdeEvent = 
@@ -3585,9 +3720,13 @@ export type IdeEvent =
  *  The backend changed a document (reload from disk, formatting, refactoring).
  *  The UI applies `changes` on top of `base_version`, yielding `version`.
  */
-{ type: "docPatched"; doc: DocId; baseVersion: number; version: number; changes: TextChange[] } | 
+{ type: "docPatched"; doc: DocId; baseVersion: number; version: number; changes: TextChange[]; 
+/**  Part of a grouped transaction; the editor must not record a file-local undo. */
+workspaceEdit?: boolean } | 
 /**  A document's dirty flag changed (saved / modified externally). */
 { type: "docDirty"; doc: DocId; dirty: boolean } | 
+/**  A complete workspace edit can be undone as one operation. */
+{ type: "workspaceEditApplied"; id: number; paths: IpcPath[] } | 
 /**
  *  An open document's language changed (Settings › File Types, Override File
  *  Type), or its UI mode (a framework's root marker appeared or went).
@@ -3605,6 +3744,8 @@ cancellable: boolean } |
 { type: "indexState"; indexing: boolean; files: number; symbols: number } | 
 /**  Git status / branch information should be refreshed. */
 { type: "vcsChanged"; root: IpcPath } | { type: "languageServer"; server: ServerId; name: string; status: ServerStatus; message: string | null } | 
+/**  A running server lacks a capability; the UI offers the managed tool as a replacement. */
+{ type: "languageServerWarning"; name: string; message: string; installTool: string } | 
 /**
  *  A stopped language server left the project's list (disabled in settings, or a
  *  fallback that a preferred server took over from again).
@@ -3961,6 +4102,10 @@ export type LanguageCodeStyle = LanguageCodeStyle_Serialize | LanguageCodeStyle_
 
 /**  Editor › Code Style › <Language> › Tabs and Indents (unset fields inherit). */
 export type LanguageCodeStyle_Deserialize = {
+	/**  Java formatter: `default` | `intellij` | `custom` (other languages ignore it). */
+	formatter?: string | null,
+	/**  Eclipse formatter XML; relative paths start at the project root. */
+	formatterPath?: string | null,
 	useTab?: boolean | null,
 	tabSize?: number | null,
 	indent?: number | null,
@@ -3973,6 +4118,10 @@ export type LanguageCodeStyle_Deserialize = {
 
 /**  Editor › Code Style › <Language> › Tabs and Indents (unset fields inherit). */
 export type LanguageCodeStyle_Serialize = {
+	/**  Java formatter: `default` | `intellij` | `custom` (other languages ignore it). */
+	formatter?: string | null,
+	/**  Eclipse formatter XML; relative paths start at the project root. */
+	formatterPath?: string | null,
 	useTab?: boolean | null,
 	tabSize?: number | null,
 	indent?: number | null,
@@ -4091,7 +4240,9 @@ export type LanguagesSettings = {
 	rust?: RustSettings,
 	go?: GoSettings,
 	typescript?: TypeScriptSettings,
+	prettier?: PrettierSettings,
 	java?: JavaSettings,
+	ruby?: RubySettings,
 };
 
 /**  What a freshly opened window should do once its frontend is up. */
@@ -4324,6 +4475,14 @@ export type MainToolbarSettings = {
 	right?: string[],
 	/**  Widgets the user removed. */
 	hidden?: string[],
+};
+
+export type ManifestDependency = {
+	package: string,
+	requirement: string,
+	/**  UTF-16 offsets of the string's contents (quotes excluded). */
+	from: number,
+	to: number,
 };
 
 /**  A marketplace entry with what is installed. */
@@ -4911,6 +5070,15 @@ export type PreparedRequest = {
 	body: string | null,
 };
 
+export type PrettierSettings = {
+	/**  Empty path: project node_modules, managed installation, then PATH. */
+	path?: string,
+	languages?: string[],
+	/**  Prefer Prettier even when a language server offers formatting. */
+	prefer?: boolean,
+	runOnSave?: boolean,
+};
+
 /**  Memory of one row of the breakdown. */
 export type ProcessMemory = {
 	category: MemoryCategory,
@@ -5167,7 +5335,13 @@ export type RecentProject = {
 	branch: string | null,
 };
 
+export type ReferenceAccess = "read" | "write" | "readWrite" | "unknown";
+
+export type ReferenceKind = "getter" | "setter" | "field" | "unknown";
+
 export type References = {
+	/**  Semantic classifications supplied by a language extension. Missing entries are unknown. */
+	classified?: ClassifiedReference[],
 	locations: Location[],
 	incomplete: ReferencesIncomplete | null,
 };
@@ -5340,6 +5514,16 @@ export type ReplaceTarget = {
 	only?: Pos[] | null,
 };
 
+export type RepositoryComparison = {
+	root: IpcPath,
+	/**  Resolved commit, so opening a diff later uses the same left side as the listing. */
+	revision: string | null,
+	files: WorkingTreeChange[],
+	error: string | null,
+	/**  The requested revision does not resolve to a commit in this repository. */
+	missingRevision?: boolean,
+};
+
 /**  A cancellable, streaming backend request issued by the UI. */
 export type RequestId = number;
 
@@ -5371,6 +5555,16 @@ export type Risk =
 "high";
 
 export type RootKind = "source" | "test" | "resources" | "testResources" | "excluded";
+
+export type RouteSource = {
+	path: string,
+	text: string,
+};
+
+export type RubySettings = {
+	/**  Project interpreter executable; empty = auto-detect (`.ruby-version`, mise / asdf, else `ruby` on PATH). */
+	interpreter?: string,
+};
 
 export type RunConfig = RunConfig_Serialize | RunConfig_Deserialize;
 
@@ -5580,7 +5774,7 @@ export type SdkKind = "python" | "node" |
 /**  JDK homes. */
 "jdk" | 
 /**  Maven homes. */
-"maven";
+"maven" | "ruby";
 
 /**
  *  IDEA's search context: matches anywhere, only in, or outside comments and
@@ -5745,6 +5939,7 @@ export type Settings_Deserialize = {
 	deployment?: DeploymentSettings,
 	/**  Build, Execution, Deployment › Run Targets. */
 	runTargets?: RunTarget[],
+	cmake?: CMakeSettings_Deserialize,
 	/**  Plugin settings (`[contributes.settings]`): plugin id → its values by key. */
 	plugins?: { [key in string]: { [key in string]: unknown } },
 };
@@ -5802,6 +5997,7 @@ export type Settings_Serialize = {
 	deployment: DeploymentSettings,
 	/**  Build, Execution, Deployment › Run Targets. */
 	runTargets: RunTarget[],
+	cmake: CMakeSettings_Serialize,
 	/**  Plugin settings (`[contributes.settings]`): plugin id → its values by key. */
 	plugins: { [key in string]: { [key in string]: unknown } },
 };
@@ -5829,6 +6025,8 @@ export type ShelvedChangeList = {
 	timeMs: number | null,
 	/**  Branch checked out when the changes were shelved. */
 	branch: string | null,
+	/**  Repository owning the patch; absent in legacy shelves. */
+	repo?: IpcPath | null,
 	/**  Repository-relative paths. */
 	files: ChangedFile[],
 };
@@ -6331,7 +6529,7 @@ export type ToolInfo = {
 
 export type ToolKind = "languageServer" | "debugger" | 
 /**  Loaded into another tool's process, e.g. a jdtls agent. */
-"plugin";
+"plugin" | "formatter";
 
 export type ToolSettings = {
 	/**  Executable to launch instead of the managed / `PATH` one; empty = auto-detect. */
@@ -6547,7 +6745,7 @@ export type VirtualDocument = {
 	title: string,
 	/**  Origin shown in the tooltip / banner, e.g. the jar path. */
 	description: string | null,
-	/**  Generated by a decompiler / disassembler rather than real sources. */
+	/**  Generated Java from a decompiler, rather than real source or a disassembler stub. */
 	decompiled: boolean,
 };
 
@@ -6610,11 +6808,26 @@ export type WindowTab = {
 /**  A workbench event delivered to plugins. */
 export type WorkbenchEvent = { kind: "fileOpened"; value: string } | { kind: "fileSaved"; value: string } | { kind: "editorFocused"; value: string | null } | { kind: "actionPerformed"; value: ActionPerformed } | { kind: "vcsChanged"; value: string } | { kind: "scheduled" };
 
+export type WorkingTreeChange = {
+	path: string,
+	kind: ChangeKind,
+	oldPath: string | null,
+	added: number,
+	removed: number,
+};
+
 export type Workspace = Workspace_Serialize | Workspace_Deserialize;
 
 /**  Edits to many files, applied atomically from the user's point of view. */
 export type WorkspaceEdit = {
 	files: FileEdit[],
+	/**  Content fingerprints captured before presenting an edit for confirmation. */
+	preconditions?: WorkspaceEditPrecondition[],
+};
+
+export type WorkspaceEditPrecondition = {
+	path: IpcPath,
+	hash: string,
 };
 
 export type WorkspaceSymbol = {
